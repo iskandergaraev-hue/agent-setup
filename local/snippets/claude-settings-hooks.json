@@ -1,0 +1,17 @@
+{
+  "_note": "Merge the hooks block into Claude settings; replace %USERPROFILE% with an absolute user directory when installing.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%USERPROFILE%/.claude/coordinator/hooks/guard.ps1\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

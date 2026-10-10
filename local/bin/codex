@@ -1,0 +1,9 @@
+#!/bin/sh
+# Shim for Git Bash / sh: runs the Codex CLI bundled with the Codex desktop app (newest build).
+root="$(cygpath -u "$LOCALAPPDATA" 2>/dev/null || echo "$LOCALAPPDATA")/OpenAI/Codex/bin"
+exe="$(ls -td "$root"/*/codex.exe 2>/dev/null | head -n 1)"
+if [ -z "$exe" ]; then
+  echo "codex.exe not found under $root. Install or update the Codex desktop app." >&2
+  exit 1
+fi
+exec "$exe" "$@"
