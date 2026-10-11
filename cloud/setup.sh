@@ -53,6 +53,32 @@ install_cloud_rules() {
     mv "$temporary" "$destination"
 }
 
+fetch_cloud_file() {
+    local name="$1" destination="$2"
+    if [[ -n "${AGENT_SETUP_LOCAL:-}" ]]; then
+        cp "$AGENT_SETUP_LOCAL/cloud/$name" "$destination"
+    else
+        curl -fsSL --connect-timeout 15 --max-time 60 \
+            "https://raw.githubusercontent.com/iskandergaraev-hue/agent-setup/${AGENT_SETUP_REF:-main}/cloud/$name" \
+            -o "$destination"
+    fi
+}
+
+prune_ecc() {
+    local work
+    if [[ "${ECC_KEEP_ALL:-}" == "1" ]]; then
+        log "ECC_KEEP_ALL=1; keeping the full ECC profile"
+        return 0
+    fi
+    work="$(mktemp -d)" || return 1
+    if fetch_cloud_file keep.txt "$work/keep.txt" && fetch_cloud_file prune.sh "$work/prune.sh"; then
+        bash "$work/prune.sh" "$work/keep.txt" "$CLAUDE_DIR"
+    else
+        log "WARNING: could not fetch prune files; keeping the full ECC profile"
+    fi
+    rm -rf -- "$work"
+}
+
 count_installed() {
     local directory="$CLAUDE_DIR/$1"
     local count
@@ -72,6 +98,7 @@ log "Starting cloud setup"
 if prepare_ecc; then
     if install_ecc; then
         ECC_STATUS="installed"
+        prune_ecc || log "WARNING: ECC pruning failed; continuing"
     else
         log "WARNING: ECC installation failed; continuing"
     fi
