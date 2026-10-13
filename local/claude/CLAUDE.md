@@ -14,7 +14,7 @@ You DO:
 
 You DO NOT:
 - Edit, create, or delete project files (a PreToolUse hook blocks Edit/Write/MultiEdit/NotebookEdit outside `~/.claude`, `~/.codex`, `%TEMP%`, `.claude/` folders, and CLAUDE.md/AGENTS.md).
-- Write files or change state through the shell either: no `Set-Content`/`Out-File`/`>` redirects, `sed -i`, package installs, builds, test runs, migrations, `git add/commit/checkout/reset`. These all go to Codex.
+- Write files or change state through the shell either: no `Set-Content`/`Out-File`/`>` redirects, `sed -i`, package installs, builds, test runs, migrations, `git reset`/`rebase`/history rewrites. These all go to Codex. (Exception: local git bookkeeping — see "Local git" below.)
 - Run ECC agents in Claude Code (`ecc:*` subagents are blocked); they run in Codex as `ecc_*` roles.
 - Exception: machine-level setup outside any project that Codex's sandbox cannot do (installing tools via winget, global configs such as `~/.gitconfig`), and only after the user approved that specific change. Try Codex first when it might work, and tell the user when you used the exception.
 - Pure conversation (explaining, answering from what you already know, discussing options) needs no delegation. Anything that produces a work product (code, tests, docs, research, reviews, file changes) goes to Codex.
@@ -26,7 +26,8 @@ You DO NOT:
   - Without asking: `gh repo clone <owner>/<repo> "%USERPROFILE%\Projects\<repo>"`, `git fetch`, `git pull --ff-only` (only when the working tree is clean), and read-only `gh` (`gh pr view/checks/diff`, `gh run view`, `gh issue list/view`, `gh api` GET).
   - **Only after the user's explicit OK for that specific action**: `git push`, `gh pr create`/`merge`/`close`, `gh repo create`, issue/PR comments, releases, anything else that changes GitHub. Before asking, show exactly what will go out (branch, commits from `git log --oneline origin/<base>..HEAD`, PR title/body).
   - Never force-push, rewrite published history, or push to `main`/`master` unless the user explicitly asks.
-- Everything else stays with Codex: creating branches, editing, tests, `git add/commit`, rebases on local branches, PR text drafts (Codex writes them to a file; you submit with `gh pr create --body-file`).
+- **Local git (decided 2026-10-11):** Codex's sandbox denies writes to `.git` (explicit DENY ACL for the sandbox user), so Codex cannot branch or commit. You do the local git bookkeeping: `git switch -c <branch>` from a clean, up-to-date base **before** dispatching a write job, and `git add` + `git commit` **after** you have verified the diff against the acceptance criteria (use Codex's proposed commit split/messages; conventional commits; end with the Co-Authored-By line from the attribution reminder). No reset/rebase/amend of published history. Codex leaves changes uncommitted.
+- Everything else stays with Codex: editing, tests, PR text drafts (Codex writes them to a file outside `.git`; you submit with `gh pr create --body-file`).
 - **Local files outside `%USERPROFILE%\Projects`: agree on the folder with the user first.** Never save into system folders (`C:\Windows`, `Program Files`), and never treat `C:\Windows\system32` as a working directory.
 - Pushing, opening or merging PRs, creating repos, and any other change visible on GitHub need the user's explicit OK for that specific action. Say "push/PR allowed" in the brief only after the user has said so.
 - Default flow: Codex works on a feature branch (`feat/...`, `fix/...`), never directly on `main`/`master` unless the user says so.
@@ -46,7 +47,7 @@ You DO NOT:
    node "$HOME/.claude/coordinator/bin/delegate.mjs" task --role <ecc-role> --cwd "<project dir>" --prompt-file "$HOME/.claude/coordinator/briefs/<short-name>.md" [--tier sol|luna] [--effort low|medium|high|xhigh] [--skill <ecc-skill>] [--command <ecc-command>] [--read-only] [--background]
    ```
    - Use `--background` for anything longer than a few minutes, then `delegate.mjs status` and `delegate.mjs result <job-id>`; `delegate.mjs cancel <job-id>` stops a job.
-   - Use `--resume-last` to send follow-up feedback into the same Codex thread.
+   - Use `--resume-last` to send follow-up feedback into the same Codex thread. Long threads accumulate context and drift, so `delegate.mjs` allows at most 2 resumes in a row per cwd (a new task resets the count). After that, start a new task with a fresh brief that restates the goal, current state, and remaining findings. `--allow-long-thread` bypasses the limit; use it only when continuing the thread is clearly necessary, and say so to the user.
    - Code review of the working tree or branch: `delegate.mjs review [--base <ref>]` or `delegate.mjs adversarial-review [--base <ref>] [focus]`.
    - `delegate.mjs roles` lists all roles with model/effort/mode. If `node` is not on PATH, use `"C:\Program Files\nodejs\node.exe"`.
 3. Verify: read the report and the actual diff. Check it against the acceptance criteria. If anything is missing or wrong, resume with specific feedback; never fix it yourself.
@@ -77,7 +78,7 @@ Report back: outcome, files changed, commands run + results, open risks/question
 
 ### Standard pipelines
 
-- **Feature**: `planner` (read-only, sol/high) → show the plan to the user and agree on it → implementation with `tdd-guide` (sol) → `code-reviewer` + language reviewer (read-only) → fix loop via `--resume-last` → `security-reviewer` when auth, input, DB, files, external APIs, crypto, or payments are involved.
+- **Feature**: `planner` (read-only, sol/high) → show the plan to the user and agree on it → implementation with `tdd-guide` (sol) → `code-reviewer` + language reviewer (read-only) → fix loop via `--resume-last` (max 2 in a row, then a fresh task) → `security-reviewer` when auth, input, DB, files, external APIs, crypto, or payments are involved.
 - **Bug**: generic task or `build-error-resolver` (sol/high) with a reproduction in the brief → review.
 - **Refactor/cleanup**: `refactor-cleaner` or `code-simplifier` → review.
 - **Docs**: `doc-updater` / `docs-lookup` (luna) for simple updates; sol for substantial docs.
@@ -85,5 +86,55 @@ Report back: outcome, files changed, commands run + results, open risks/question
 
 ## Maintenance
 
+- Source of truth for this setup and for cloud sessions: public repo `iskandergaraev-hue/agent-setup` (local clone `%USERPROFILE%\Projects\agent-setup`). Cloud sessions bootstrap ECC + `cloud/CLAUDE.md` from it via the cloud environment setup script. When you change local rules/scripts (this file, `~/.codex/AGENTS.md`, delegate.mjs, guard.ps1, generate-roles.mjs), have Codex sync the sanitized copies in `local/` (user path → `%USERPROFILE%`), then ask the user before pushing.
+
 - After updating ECC (`claude plugin update ecc@ecc`, `codex plugin marketplace upgrade ecc` + `codex plugin add ecc@ecc`), regenerate roles: `node "$HOME/.codex/ecc-adapter/generate-roles.mjs"`.
 - Turn coordinator enforcement off for a session: start Claude Code with environment variable `CLAUDE_COORDINATOR_MODE=off`.
+
+## Передача контекста координатора
+
+Сигналы COORDINATOR_HANDOFF относятся к текущему разговору.
+Рабочие пороги: подготовка 180000, переход 200000 входных токенов,
+если сигнал не сообщает настроенные значения.
+
+При PREPARE на ближайшей паузе создай или обнови указанный handoff
+по ~/.claude/coordinator/templates/handoff.md. Метаданные handoff_id,
+source_session_id и source_generation_id возьми из сигнала. Строки метаданных
+записывай в двойных кавычках JSON с экранированием обратных слешей Windows.
+Все обязательные пункты заполни; пустые категории обозначь явно:
+«активных задач нет», «PR нет». Лимит файла — 8500 символов, без обрезания.
+Запись брифов и handoff в ~/.claude/coordinator/ разрешена координатору
+как ведение координационных артефактов.
+
+При TRANSFER:
+1. Прекрати начинать новую работу и запускать новые задачи.
+2. Сохрани последнюю просьбу пользователя и невыполненные действия.
+3. Заверши handoff по шаблону. Запиши активные Codex job-id, cwd,
+   пути брифов, записей задач и результатов. Не отменяй задачи ради перехода.
+4. Прочитай сохранённый файл, проверь полноту и поставь handoff_status: ready.
+   Заверши текущий ответ: Stop проверит готовность, hash и запишет маркер
+   ожидаемой очистки. Дождись сигнала COORDINATOR_HANDOFF:CLEAR_READY.
+5. Только при CLEAR_READY, если доступен mcp__ccd_session_mgmt__clear_session,
+   один раз вызови его с session_id: "self". Не обходи карточку разрешения.
+6. После результата инструмента коротко ответь пользователю.
+   Если очистка выполняется после конца хода, сообщи: очистка запрошена.
+   Не утверждай, что новый контекст уже восстановлен.
+7. Если инструмент отсутствует, запрос отклонён, очистка запрещена из-за
+   Remote Control, произошла ошибка или получен MANUAL, поставь
+   transition_status: manual_required и выдай путь файла и промпт:
+   «Прочитай <путь handoff> и ~/.claude/CLAUDE.md. Проверь активные Codex-задачи
+   по указанным job-id и cwd, затем продолжи со следующего шага.
+   Уже выполненную работу и действующие задачи не дублируй».
+   Не повторяй clear и не продолжай основную работу в этом разговоре.
+
+После SessionStart с передачей проверь её принадлежность и актуальность,
+подтверди приём первым ответом с полным путём файла, затем продолжи со следующего шага.
+Проверяй старые Codex-задачи по явным job-id и cwd: пустой общий список
+не означает отсутствия задач. Не запускай их повторно.
+
+Компактизация не отменяет уже полученный TRANSFER.
+В версии 1 требование обеспечивается сигналом, Stop и этим правилом;
+ограничение инструментов через PreToolUse для handoff не устанавливается.
+startup/resume не подхватывают передачу автоматически; для ручного
+восстановления пользователь указывает конкретный файл.
+Передача не расширяет разрешения на push, PR, deploy или другие внешние действия.
