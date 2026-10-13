@@ -19,6 +19,8 @@
 //   --read-only          no file edits (default: write-capable unless the role is read-only)
 //   --background         run as a background job; check with `status` / `result`
 //   --resume-last        continue the last Codex rescue thread for this repo
+//                        (at most 2 in a row per cwd; then start a new task with a fresh brief)
+//   --allow-long-thread  bypass the resume limit for this one call (use sparingly)
 
 import fs from "node:fs";
 import os from "node:os";
@@ -31,6 +33,9 @@ const EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 const ROLES_FILE = path.join(HOME, ".codex", "ecc-adapter", "roles.json");
 const BRIEFS_DIR = path.join(HOME, ".claude", "coordinator", "briefs");
 const PASSTHROUGH = new Set(["status", "result", "cancel", "review", "adversarial-review", "setup"]);
+/* Long Codex threads accumulate context and drift; cap consecutive --resume-last calls per cwd. */
+const MAX_RESUMES = 2;
+const RESUME_STATE = path.join(HOME, ".claude", "coordinator", "state", "resume-chain.json");
 
 function fail(message) {
   console.error(`delegate: ${message}`);
@@ -95,7 +100,7 @@ function parseTaskArgs(argv) {
       if (v === undefined) fail(`--${key} needs a value`);
       if (key === "skill") opts.skills.push(v.replace(/^\$/, ""));
       else opts[key] = v;
-    } else if (["read-only", "background", "resume-last"].includes(key)) {
+    } else if (["read-only", "background", "resume-last", "allow-long-thread"].includes(key)) {
       opts[key] = true;
     } else {
       fail(`unknown option --${key}`);
@@ -117,6 +122,35 @@ function readBrief(opts, cwd) {
   return "";
 }
 
+function resumeKey(cwd) {
+  return path.resolve(cwd).toLowerCase();
+}
+
+function loadResumeState() {
+  try {
+    return JSON.parse(fs.readFileSync(RESUME_STATE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+/* Returns the new chain length for this cwd: 0 for a fresh task, n+1 for a resume. */
+function trackResume(cwd, resuming, allowLong) {
+  const state = loadResumeState();
+  const key = resumeKey(cwd);
+  const count = state[key]?.count || 0;
+  if (resuming && count >= MAX_RESUMES && !allowLong) {
+    fail(`--resume-last refused: this Codex thread was already resumed ${count} times in a row for ${cwd}. ` +
+      `Start a new task with a fresh brief (state the remaining work and review findings), ` +
+      `or pass --allow-long-thread if continuing this thread is really necessary.`);
+  }
+  const next = resuming ? count + 1 : 0;
+  state[key] = { count: next, updatedAt: new Date().toISOString() };
+  fs.mkdirSync(path.dirname(RESUME_STATE), { recursive: true });
+  fs.writeFileSync(RESUME_STATE, JSON.stringify(state, null, 2) + "\n", "utf8");
+  return next;
+}
+
 function task(argv) {
   const opts = parseTaskArgs(argv);
   if (opts.model) fail("--model is not allowed. Use --tier sol (gpt-6.1-sol) or --tier luna (gpt-6-luna).");
@@ -133,6 +167,7 @@ function task(argv) {
 
   const brief = readBrief(opts, cwd).trim();
   if (!brief && !opts["resume-last"]) fail("empty brief. Pass --prompt-file, inline text, or stdin.");
+  const chain = trackResume(cwd, Boolean(opts["resume-last"]), Boolean(opts["allow-long-thread"]));
 
   const sections = [
     `# Task brief from the Claude Code coordinator`,
@@ -173,6 +208,7 @@ function task(argv) {
 
   console.error(`delegate: ${role ? role.codex : "generic"} -> ${TIERS[tier]} (${effort}), ${readOnly ? "read-only" : "write"}, cwd=${cwd}`);
   console.error(`delegate: brief saved to ${briefFile}`);
+  if (opts["resume-last"]) console.error(`delegate: resume ${chain}/${MAX_RESUMES} in a row for this cwd`);
   runCompanion(args, cwd);
 }
 

@@ -47,7 +47,7 @@ You DO NOT:
    node "$HOME/.claude/coordinator/bin/delegate.mjs" task --role <ecc-role> --cwd "<project dir>" --prompt-file "$HOME/.claude/coordinator/briefs/<short-name>.md" [--tier sol|luna] [--effort low|medium|high|xhigh] [--skill <ecc-skill>] [--command <ecc-command>] [--read-only] [--background]
    ```
    - Use `--background` for anything longer than a few minutes, then `delegate.mjs status` and `delegate.mjs result <job-id>`; `delegate.mjs cancel <job-id>` stops a job.
-   - Use `--resume-last` to send follow-up feedback into the same Codex thread.
+   - Use `--resume-last` to send follow-up feedback into the same Codex thread. Long threads accumulate context and drift, so `delegate.mjs` allows at most 2 resumes in a row per cwd (a new task resets the count). After that, start a new task with a fresh brief that restates the goal, current state, and remaining findings. `--allow-long-thread` bypasses the limit; use it only when continuing the thread is clearly necessary, and say so to the user.
    - Code review of the working tree or branch: `delegate.mjs review [--base <ref>]` or `delegate.mjs adversarial-review [--base <ref>] [focus]`.
    - `delegate.mjs roles` lists all roles with model/effort/mode. If `node` is not on PATH, use `"C:\Program Files\nodejs\node.exe"`.
 3. Verify: read the report and the actual diff. Check it against the acceptance criteria. If anything is missing or wrong, resume with specific feedback; never fix it yourself.
@@ -78,7 +78,7 @@ Report back: outcome, files changed, commands run + results, open risks/question
 
 ### Standard pipelines
 
-- **Feature**: `planner` (read-only, sol/high) → show the plan to the user and agree on it → implementation with `tdd-guide` (sol) → `code-reviewer` + language reviewer (read-only) → fix loop via `--resume-last` → `security-reviewer` when auth, input, DB, files, external APIs, crypto, or payments are involved.
+- **Feature**: `planner` (read-only, sol/high) → show the plan to the user and agree on it → implementation with `tdd-guide` (sol) → `code-reviewer` + language reviewer (read-only) → fix loop via `--resume-last` (max 2 in a row, then a fresh task) → `security-reviewer` when auth, input, DB, files, external APIs, crypto, or payments are involved.
 - **Bug**: generic task or `build-error-resolver` (sol/high) with a reproduction in the brief → review.
 - **Refactor/cleanup**: `refactor-cleaner` or `code-simplifier` → review.
 - **Docs**: `doc-updater` / `docs-lookup` (luna) for simple updates; sol for substantial docs.
